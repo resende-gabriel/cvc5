@@ -238,16 +238,15 @@ DratProof DratProof::fromPlain(const std::string& s)
     // derived literal
     int literalIndex = -1;
     DratInstructionKind kind = ADDITION;
-    if (columns.size() == 2)
+    if (columns.size() >= 2)
     {
       // last but one column is the literal, last column is 0
-      literalIndex = 0;
+      literalIndex = columns.size() - 2;
     }
     // deleted literal
-    if (columns.size() == 5 && columns[0] == "d")
+    if (columns[0] == "d")
     {
       // last but one column is the literal, last column is 0
-      literalIndex = 3;
       kind = DELETION;
     }
     if (literalIndex != -1)

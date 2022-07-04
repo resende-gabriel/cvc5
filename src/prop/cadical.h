@@ -64,6 +64,8 @@ class CadicalSolver : public SatSolver
 
   void setDrat(std::ostream& os) override;
 
+  std::string getDrat() override;
+
  private:
   /**
    * Private to disallow creation outside of SatSolverFactory.

@@ -210,20 +210,11 @@ void BVSolverBitblast::postCheck(Theory::Effort level)
   std::vector<prop::SatLiteral> assumptions(d_assumptions.begin(),
                                             d_assumptions.end());
   prop::SatValue val = d_satSolver->solve(assumptions);
-  std::cout << "\nd_binaryDratProof after solve: \"" << d_binaryDratProof.str() << "\"\n";
 
   if (val == prop::SatValue::SAT_VALUE_FALSE)
   {
     std::vector<prop::SatLiteral> unsat_assumptions;
     d_satSolver->getUnsatAssumptions(unsat_assumptions);
-    std::cout << "\nd_binaryDratProof after getUnsatAssumptions: \"" << d_binaryDratProof.str() << "\"\n";
-
-    // std::ifstream t("file.txt");
-    // std::stringstream buffer;
-    // buffer << t.rdbuf();
-    // proof::DratProof dratProof = proof::DratProof::fromPlain(buffer.str());
-    // proof::DratProof dratProof = proof::DratProof::fromBinary(input);
-    // std::vector<Node> proofNodes = getProofNodes(dratProof);
 
     Node conflict;
     // Unsat assumptions produce conflict.
@@ -243,6 +234,29 @@ void BVSolverBitblast::postCheck(Theory::Effort level)
       std::vector<Node> assertions(d_assertions.begin(), d_assertions.end());
       conflict = nm->mkAnd(assertions);
     }
+
+    std::cout << "\nd_binaryDratProof: \"" << d_binaryDratProof.str() << "\"\n";
+
+    std::ofstream myfile;
+    myfile.open("example.txt");
+    myfile << d_binaryDratProof.str();
+    myfile.close();
+
+    std::ifstream dratFile("temp-drat-file-static.drat", std::ios::binary); //taking file as inputstream
+    std::string drat;
+    std::ostringstream ss;
+    ss << dratFile.rdbuf(); // reading data
+    drat = ss.str();
+
+    if (options().bv.bvSatSolver == options::SatSolverMode::CADICAL && options().smt.produceProofs)
+    {
+      // drat = d_satSolver->getDrat();
+      d_satSolver->getDrat();
+    }
+
+    proof::DratProof dratProof = proof::DratProof::fromPlain(drat);
+    std::vector<Node> proofNodes = getProofNodes(dratProof);
+
     // conflict = nm->mkNode(conflict, proofNodes);
     d_im.conflict(conflict, InferenceId::BV_BITBLAST_CONFLICT);
     // d_im.trustedConflict(conflict, InferenceId::BV_BITBLAST_CONFLICT);
@@ -251,10 +265,18 @@ void BVSolverBitblast::postCheck(Theory::Effort level)
 
 std::vector<Node> BVSolverBitblast::getProofNodes(proof::DratProof dratProof)
 {
+  std::cout << "d_literalFactCache" << std::endl;
+  for(auto a : d_literalFactCache) {
+    std::cout << "toInt: " << a.first.toInt() << " - toString: " << a.first.toString() << std::endl;
+  }
+  std::cout << "dratProof.getInstructions" << std::endl;
+  for(auto a : dratProof.getInstructions()) {
+    std::cout << "toInt: " << a.d_literal.toInt() << " - toString: " << a.d_literal.toString() << std::endl;
+  }
   NodeManager* nm = NodeManager::currentNM();
   Node cl = nm->mkBoundVar("cl", nm->booleanType());
   Node del = nm->mkBoundVar("del", nm->booleanType());
-  Node lastFalseResolution = nm->mkBoundVar("false", nm->booleanType());
+  Node lastFalseResolution = nm->mkConst<bool>(false);
 
   std::vector<Node> args;
   for (const proof::DratInstruction instruction : dratProof.getInstructions())
@@ -266,6 +288,10 @@ std::vector<Node> BVSolverBitblast::getProofNodes(proof::DratProof dratProof)
       break;
     }
     Node fact = d_literalFactCache[instruction.d_literal];
+    if (fact.isNull()) {
+      // what to do in this case, just ignore it?
+      continue;
+    }
     if (instruction.d_kind == proof::DratInstructionKind::DELETION)
     {
       args.push_back(nm->mkNode(kind::SEXPR, {del, fact}));

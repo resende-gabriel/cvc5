@@ -163,7 +163,6 @@ SatValue CadicalSolver::solve(const std::vector<SatLiteral>& assumptions)
   SatValue res = toSatValue(d_solver->solve());
   d_inSatMode = (res == SAT_VALUE_TRUE);
   ++d_statistics.d_numSatCalls;
-  // d_solver->close_proof_trace();
   return res;
 }
 
@@ -208,14 +207,22 @@ bool CadicalSolver::ok() const { return d_inSatMode; }
 
 void CadicalSolver::setDrat(std::ostream& os)
 {
-  // std::ofstream file;
-  d_dratFile = fopen("temp-drat-file.drat", "w+");
+  d_dratFile = fopen("temp-drat-file.drat", "wb");
 
-  // FILE* dratFile;
-  // std::cout << d_solver.get(d_solver.);
-  std::cout << d_solver->trace_proof(d_dratFile, "temp-drat-file.drat");
+  d_solver->set_long_option("--no-binary");
+  // d_solver->trace_proof(stdout, "<stdout>");
+  d_solver->trace_proof(d_dratFile, "temp-drat-file.drat");
   // d_solver->close_proof_trace();
   // std::cout << d_solver->trace_proof("temp-drat-file");
+}
+
+std::string CadicalSolver::getDrat() {
+  // d_solver->close_proof_trace();
+  std::ifstream dratFile("temp-drat-file.drat", std::ios::binary); //taking file as inputstream
+  std::ostringstream dratFileStringStream;
+  dratFileStringStream << dratFile.rdbuf(); // reading data
+  std::cout << "drat stream " << dratFileStringStream.str() << ",";
+  return dratFileStringStream.str();
 }
 
 CadicalSolver::Statistics::Statistics(StatisticsRegistry& registry,
