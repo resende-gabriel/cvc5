@@ -16,6 +16,7 @@
 #include "theory/bv/bv_solver_bitblast.h"
 
 #include "options/bv_options.h"
+#include "options/smt_options.h"
 #include "prop/sat_solver_factory.h"
 #include "smt/smt_statistics_registry.h"
 #include "proof/drat/drat_proof.h"
@@ -235,26 +236,12 @@ void BVSolverBitblast::postCheck(Theory::Effort level)
       conflict = nm->mkAnd(assertions);
     }
 
-    std::cout << "\nd_binaryDratProof: \"" << d_binaryDratProof.str() << "\"\n";
-
-    std::ofstream myfile;
-    myfile.open("example.txt");
-    myfile << d_binaryDratProof.str();
-    myfile.close();
-
-    std::ifstream dratFile("temp-drat-file-static.drat", std::ios::binary); //taking file as inputstream
-    std::string drat;
-    std::ostringstream ss;
-    ss << dratFile.rdbuf(); // reading data
-    drat = ss.str();
-
     if (options().bv.bvSatSolver == options::SatSolverMode::CADICAL && options().smt.produceProofs)
     {
-      // drat = d_satSolver->getDrat();
-      d_satSolver->getDrat();
+      d_dratProof << d_satSolver->getDrat();
     }
 
-    proof::DratProof dratProof = proof::DratProof::fromPlain(drat);
+    proof::DratProof dratProof = proof::DratProof::fromPlain(d_dratProof.str());
     std::vector<Node> proofNodes = getProofNodes(dratProof);
 
     // conflict = nm->mkNode(conflict, proofNodes);
@@ -265,13 +252,17 @@ void BVSolverBitblast::postCheck(Theory::Effort level)
 
 std::vector<Node> BVSolverBitblast::getProofNodes(proof::DratProof dratProof)
 {
-  std::cout << "d_literalFactCache" << std::endl;
-  for(auto a : d_literalFactCache) {
+  std::cout << "d_cnfStream->getNodeCache()" << std::endl;
+  for(auto a : d_cnfStream->getNodeCache()) {
     std::cout << "toInt: " << a.first.toInt() << " - toString: " << a.first.toString() << std::endl;
   }
-  std::cout << "dratProof.getInstructions" << std::endl;
-  for(auto a : dratProof.getInstructions()) {
-    std::cout << "toInt: " << a.d_literal.toInt() << " - toString: " << a.d_literal.toString() << std::endl;
+  std::cout << "\ndratProof.getInstructions" << std::endl;
+  for(auto instruction : dratProof.getInstructions()) {
+    std::cout << "kind: " << instruction.d_kind << std::endl;
+    for(auto lit : instruction.d_clause) {
+      std::cout << "toInt: " << lit.toInt() << " - toString: " << lit.toString() << std::endl;
+    }
+    std::cout << std::endl;
   }
   NodeManager* nm = NodeManager::currentNM();
   Node cl = nm->mkBoundVar("cl", nm->booleanType());
@@ -281,22 +272,37 @@ std::vector<Node> BVSolverBitblast::getProofNodes(proof::DratProof dratProof)
   std::vector<Node> args;
   for (const proof::DratInstruction instruction : dratProof.getInstructions())
   {
-    if (instruction.d_literal.toInt() == 0)
+    if (instruction.d_clause.size() == 0 && instruction.d_clause[0].toInt() == 0)
     {
-      // validate this
       args.push_back(nm->mkNode(kind::SEXPR, {cl, lastFalseResolution}));
       break;
     }
-    Node fact = d_literalFactCache[instruction.d_literal];
-    if (fact.isNull()) {
-      // what to do in this case, just ignore it?
-      continue;
-    }
+    std::vector<Node> clauseNodes;
     if (instruction.d_kind == proof::DratInstructionKind::DELETION)
     {
-      args.push_back(nm->mkNode(kind::SEXPR, {del, fact}));
+      clauseNodes.emplace_back(del);
     }
-    args.push_back(nm->mkNode(kind::SEXPR, {cl, fact}));
+    else
+    {
+      clauseNodes.emplace_back(cl);
+    }
+    for (const prop::SatLiteral literal : instruction.d_clause)
+    {
+      std::cout << "\n\n\n\n b4 get node " << literal << std::endl;
+      Node fact = d_cnfStream->getNode(literal);
+      std::cout << "\n\n\n\n after get node " << fact << std::endl;
+      if (fact.isNull()) {
+        std::cout << "\n\n\n\nnull fact for " << literal.toString();
+        continue;
+        std::ostringstream errmsg;
+        errmsg << "Not found node corresponding to literal from drat proof: \""
+                << literal
+                << "\"";
+        throw Exception(errmsg.str());
+      }
+      clauseNodes.emplace_back(fact);
+    }
+    args.push_back(nm->mkNode(kind::SEXPR, clauseNodes));
   }
   return args;
 }
