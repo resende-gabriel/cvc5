@@ -91,6 +91,9 @@ class BVSolverBitblast : public BVSolver
    */
   void handleEagerAtom(TNode fact, bool assertFact);
 
+  /** Proof node manager. */
+  ProofNodeManager* d_pnm;
+
   /** Bit-blaster used to bit-blast atoms/terms. */
   std::unique_ptr<NodeBitblaster> d_bitblaster;
 

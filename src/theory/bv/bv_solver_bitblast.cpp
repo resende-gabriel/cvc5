@@ -123,6 +123,7 @@ BVSolverBitblast::BVSolverBitblast(Env& env,
       d_assumptions(context()),
       d_assertions(context()),
       d_epg(pnm ? new EagerProofGenerator(pnm, userContext(), "") : nullptr),
+      d_pnm(pnm),
       d_factLiteralCache(context()),
       d_literalFactCache(context()),
       d_propagate(options().bv.bitvectorPropagate),
@@ -244,26 +245,19 @@ void BVSolverBitblast::postCheck(Theory::Effort level)
     proof::DratProof dratProof = proof::DratProof::fromPlain(d_dratProof.str());
     std::vector<Node> proofNodes = getProofNodes(dratProof);
 
-    // conflict = nm->mkNode(conflict, proofNodes);
-    d_im.conflict(conflict, InferenceId::BV_BITBLAST_CONFLICT);
-    // d_im.trustedConflict(conflict, InferenceId::BV_BITBLAST_CONFLICT);
+    if (!options().smt.produceProofs)
+    {
+      d_im.conflict(conflict, InferenceId::BV_BITBLAST_CONFLICT);
+      return;
+    }
+    std::shared_ptr<ProofNode> proofNode = d_pnm->mkNode(PfRule::DRAT_REFUTATION, {}, proofNodes, nm->mkNode(kind::NOT, conflict));
+    TrustNode trustConflict = d_epg->mkTrustNode(conflict, proofNode, true);
+    d_im.trustedConflict(trustConflict, InferenceId::BV_BITBLAST_CONFLICT);
   }
 }
 
 std::vector<Node> BVSolverBitblast::getProofNodes(proof::DratProof dratProof)
 {
-  std::cout << "d_cnfStream->getNodeCache()" << std::endl;
-  for(auto a : d_cnfStream->getNodeCache()) {
-    std::cout << "toInt: " << a.first.toInt() << " - toString: " << a.first.toString() << std::endl;
-  }
-  std::cout << "\ndratProof.getInstructions" << std::endl;
-  for(auto instruction : dratProof.getInstructions()) {
-    std::cout << "kind: " << instruction.d_kind << std::endl;
-    for(auto lit : instruction.d_clause) {
-      std::cout << "toInt: " << lit.toInt() << " - toString: " << lit.toString() << std::endl;
-    }
-    std::cout << std::endl;
-  }
   NodeManager* nm = NodeManager::currentNM();
   Node cl = nm->mkBoundVar("cl", nm->booleanType());
   Node del = nm->mkBoundVar("del", nm->booleanType());
@@ -288,12 +282,8 @@ std::vector<Node> BVSolverBitblast::getProofNodes(proof::DratProof dratProof)
     }
     for (const prop::SatLiteral literal : instruction.d_clause)
     {
-      std::cout << "\n\n\n\n b4 get node " << literal << std::endl;
       Node fact = d_cnfStream->getNode(literal);
-      std::cout << "\n\n\n\n after get node " << fact << std::endl;
       if (fact.isNull()) {
-        std::cout << "\n\n\n\nnull fact for " << literal.toString();
-        continue;
         std::ostringstream errmsg;
         errmsg << "Not found node corresponding to literal from drat proof: \""
                 << literal
@@ -413,12 +403,14 @@ void BVSolverBitblast::initSatSolver()
           getDratOstream(),
           "theory::bv::BVSolverBitblast::"));
   }
-  d_cnfStream.reset(new prop::CnfStream(d_env,
-                                        d_satSolver.get(),
-                                        d_bbRegistrar.get(),
-                                        d_nullContext.get(),
-                                        prop::FormulaLitPolicy::INTERNAL,
-                                        "theory::bv::BVSolverBitblast"));
+  bool proofs = d_env.isTheoryProofProducing();
+  d_cnfStream.reset(new prop::CnfStream(
+      d_env,
+      d_satSolver.get(),
+      d_bbRegistrar.get(),
+      d_nullContext.get(),
+      proofs ? prop::FormulaLitPolicy::TRACK : prop::FormulaLitPolicy::INTERNAL,
+      "theory::bv::BVSolverBitblast"));
 }
 
 Node BVSolverBitblast::getValue(TNode node, bool initialize)
