@@ -24,7 +24,7 @@ void BVProofRuleChecker::registerTo(ProofChecker* pc)
   pc->registerChecker(PfRule::BV_BITBLAST, this);
   pc->registerChecker(PfRule::BV_BITBLAST_STEP, this);
   pc->registerChecker(PfRule::BV_EAGER_ATOM, this);
-  // pc->registerChecker(PfRule::DRAT_REFUTATION, this);
+  pc->registerChecker(PfRule::DRAT_REFUTATION, this);
 }
 
 Node BVProofRuleChecker::checkInternal(PfRule id,
@@ -50,6 +50,14 @@ Node BVProofRuleChecker::checkInternal(PfRule id,
     Assert(children.empty());
     Assert(args.size() == 1);
     Assert(args[0].getKind() == kind::BITVECTOR_EAGER_ATOM);
+    return args[0].eqNode(args[0][0]);
+  }
+  else if (id == PfRule::DRAT_REFUTATION)
+  {
+    Assert(children.empty());
+    Assert(args.size() == 1);
+    Assert(args[0].getKind() == kind::EQUAL);
+    // return args[0];
     return args[0].eqNode(args[0][0]);
   }
   // no rule

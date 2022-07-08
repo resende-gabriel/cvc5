@@ -250,9 +250,24 @@ void BVSolverBitblast::postCheck(Theory::Effort level)
       d_im.conflict(conflict, InferenceId::BV_BITBLAST_CONFLICT);
       return;
     }
+    // without the NOT wrapped, the error "pf->getResult() == f" from src/proof/eager_proof_generator.cpp:34 occurs
+    // Expected: (not (and (not (= SKOLEM_FUN_ARRAY_DEQ_DIFF_1 #b000)) (not (= SKOLEM_FUN_ARRAY_DEQ_DIFF_1 #b001)) (= SKOLEM_FUN_ARRAY_DEQ_DIFF_1 (concat #b00 v))))
+    // Actual: (and (not (= SKOLEM_FUN_ARRAY_DEQ_DIFF_1 #b000)) (not (= SKOLEM_FUN_ARRAY_DEQ_DIFF_1 #b001)) (= SKOLEM_FUN_ARRAY_DEQ_DIFF_1 (concat #b00 v)))"
+
+    // this returns "Unreachable code reached ProofChecker::check: failed, result does not match expected value."
     std::shared_ptr<ProofNode> proofNode = d_pnm->mkNode(PfRule::DRAT_REFUTATION, {}, proofNodes, nm->mkNode(kind::NOT, conflict));
     TrustNode trustConflict = d_epg->mkTrustNode(conflict, proofNode, true);
+
+    // this returns "pf->getResult() == f"
+    // TrustNode trustConflict = d_epg->mkTrustNode(conflict, PfRule::DRAT_REFUTATION, {}, proofNodes, true);
+
+    // this returns "atom.getKind() != AND"
+    // TrustNode trustConflict = d_im.mkConflictExp(PfRule::DRAT_REFUTATION, {conflict}, proofNodes);
+
     d_im.trustedConflict(trustConflict, InferenceId::BV_BITBLAST_CONFLICT);
+
+
+    // d_im.conflictExp(InferenceId::BV_BITBLAST_CONFLICT, PfRule::DRAT_REFUTATION, {conflict}, proofNodes);
   }
 }
 
