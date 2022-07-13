@@ -16,8 +16,10 @@
 #include "theory/bv/bv_solver_bitblast.h"
 
 #include "options/bv_options.h"
+#include "options/smt_options.h"
 #include "prop/sat_solver_factory.h"
 #include "smt/smt_statistics_registry.h"
+#include "proof/drat/drat_proof.h"
 #include "theory/bv/theory_bv.h"
 #include "theory/bv/theory_bv_utils.h"
 #include "theory/theory_model.h"
@@ -121,6 +123,7 @@ BVSolverBitblast::BVSolverBitblast(Env& env,
       d_assumptions(context()),
       d_assertions(context()),
       d_epg(pnm ? new EagerProofGenerator(pnm, userContext(), "") : nullptr),
+      d_pnm(pnm),
       d_factLiteralCache(context()),
       d_literalFactCache(context()),
       d_propagate(options().bv.bitvectorPropagate),
@@ -233,8 +236,80 @@ void BVSolverBitblast::postCheck(Theory::Effort level)
       std::vector<Node> assertions(d_assertions.begin(), d_assertions.end());
       conflict = nm->mkAnd(assertions);
     }
-    d_im.conflict(conflict, InferenceId::BV_BITBLAST_CONFLICT);
+
+    if (options().bv.bvSatSolver == options::SatSolverMode::CADICAL && options().smt.produceProofs)
+    {
+      d_dratProof << d_satSolver->getDrat();
+    }
+
+    proof::DratProof dratProof = proof::DratProof::fromPlain(d_dratProof.str());
+    std::vector<Node> proofNodes = getProofNodes(dratProof);
+
+    if (!options().smt.produceProofs)
+    {
+      d_im.conflict(conflict, InferenceId::BV_BITBLAST_CONFLICT);
+      return;
+    }
+    // without the NOT wrapped, the error "pf->getResult() == f" from src/proof/eager_proof_generator.cpp:34 occurs
+    // Expected: (not (and (not (= SKOLEM_FUN_ARRAY_DEQ_DIFF_1 #b000)) (not (= SKOLEM_FUN_ARRAY_DEQ_DIFF_1 #b001)) (= SKOLEM_FUN_ARRAY_DEQ_DIFF_1 (concat #b00 v))))
+    // Actual: (and (not (= SKOLEM_FUN_ARRAY_DEQ_DIFF_1 #b000)) (not (= SKOLEM_FUN_ARRAY_DEQ_DIFF_1 #b001)) (= SKOLEM_FUN_ARRAY_DEQ_DIFF_1 (concat #b00 v)))"
+
+    // this returns "Unreachable code reached ProofChecker::check: failed, result does not match expected value."
+    std::shared_ptr<ProofNode> proofNode = d_pnm->mkNode(PfRule::DRAT_REFUTATION, {}, proofNodes, nm->mkNode(kind::NOT, conflict));
+    TrustNode trustConflict = d_epg->mkTrustNode(conflict, proofNode, true);
+
+    // this returns "pf->getResult() == f"
+    // TrustNode trustConflict = d_epg->mkTrustNode(conflict, PfRule::DRAT_REFUTATION, {}, proofNodes, true);
+
+    // this returns "atom.getKind() != AND"
+    // TrustNode trustConflict = d_im.mkConflictExp(PfRule::DRAT_REFUTATION, {conflict}, proofNodes);
+
+    d_im.trustedConflict(trustConflict, InferenceId::BV_BITBLAST_CONFLICT);
+
+
+    // d_im.conflictExp(InferenceId::BV_BITBLAST_CONFLICT, PfRule::DRAT_REFUTATION, {conflict}, proofNodes);
   }
+}
+
+std::vector<Node> BVSolverBitblast::getProofNodes(proof::DratProof dratProof)
+{
+  NodeManager* nm = NodeManager::currentNM();
+  Node cl = nm->mkBoundVar("cl", nm->booleanType());
+  Node del = nm->mkBoundVar("del", nm->booleanType());
+  Node lastFalseResolution = nm->mkConst<bool>(false);
+
+  std::vector<Node> args;
+  for (const proof::DratInstruction instruction : dratProof.getInstructions())
+  {
+    if (instruction.d_clause.size() == 0 && instruction.d_clause[0].toInt() == 0)
+    {
+      args.push_back(nm->mkNode(kind::SEXPR, {cl, lastFalseResolution}));
+      break;
+    }
+    std::vector<Node> clauseNodes;
+    if (instruction.d_kind == proof::DratInstructionKind::DELETION)
+    {
+      clauseNodes.emplace_back(del);
+    }
+    else
+    {
+      clauseNodes.emplace_back(cl);
+    }
+    for (const prop::SatLiteral literal : instruction.d_clause)
+    {
+      Node fact = d_cnfStream->getNode(literal);
+      if (fact.isNull()) {
+        std::ostringstream errmsg;
+        errmsg << "Not found node corresponding to literal from drat proof: \""
+                << literal
+                << "\"";
+        throw Exception(errmsg.str());
+      }
+      clauseNodes.emplace_back(fact);
+    }
+    args.push_back(nm->mkNode(kind::SEXPR, clauseNodes));
+  }
+  return args;
 }
 
 bool BVSolverBitblast::preNotifyFact(
@@ -333,20 +408,24 @@ void BVSolverBitblast::initSatSolver()
       d_satSolver.reset(prop::SatSolverFactory::createCryptoMinisat(
           smtStatisticsRegistry(),
           d_env.getResourceManager(),
+          getDratOstream(),
           "theory::bv::BVSolverBitblast::"));
       break;
     default:
       d_satSolver.reset(prop::SatSolverFactory::createCadical(
           smtStatisticsRegistry(),
           d_env.getResourceManager(),
+          getDratOstream(),
           "theory::bv::BVSolverBitblast::"));
   }
-  d_cnfStream.reset(new prop::CnfStream(d_env,
-                                        d_satSolver.get(),
-                                        d_bbRegistrar.get(),
-                                        d_nullContext.get(),
-                                        prop::FormulaLitPolicy::INTERNAL,
-                                        "theory::bv::BVSolverBitblast"));
+  bool proofs = d_env.isTheoryProofProducing();
+  d_cnfStream.reset(new prop::CnfStream(
+      d_env,
+      d_satSolver.get(),
+      d_bbRegistrar.get(),
+      d_nullContext.get(),
+      proofs ? prop::FormulaLitPolicy::TRACK : prop::FormulaLitPolicy::INTERNAL,
+      "theory::bv::BVSolverBitblast"));
 }
 
 Node BVSolverBitblast::getValue(TNode node, bool initialize)
@@ -406,6 +485,11 @@ void BVSolverBitblast::handleEagerAtom(TNode fact, bool assertFact)
   }
   // Clear cache since we only need to do this once per bit-blasted atom.
   registeredAtoms.clear();
+}
+
+BVProofRuleChecker* BVSolverBitblast::getProofChecker()
+{
+  return &d_bvProofChecker;
 }
 
 }  // namespace bv

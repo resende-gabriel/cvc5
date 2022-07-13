@@ -75,6 +75,7 @@ void BoolProofRuleChecker::registerTo(ProofChecker* pc)
   pc->registerChecker(PfRule::CNF_ITE_NEG2, this);
   pc->registerChecker(PfRule::CNF_ITE_NEG3, this);
   pc->registerTrustedChecker(PfRule::SAT_REFUTATION, this, 1);
+  pc->registerTrustedChecker(PfRule::DRAT_REFUTATION, this, 1);
 }
 
 Node BoolProofRuleChecker::checkInternal(PfRule id,
@@ -931,6 +932,11 @@ Node BoolProofRuleChecker::checkInternal(PfRule id,
   if (id == PfRule::SAT_REFUTATION)
   {
     Assert(args.empty());
+    return NodeManager::currentNM()->mkConst(false);
+  }
+  if (id == PfRule::DRAT_REFUTATION)
+  {
+    // Assert(args.empty());
     return NodeManager::currentNM()->mkConst(false);
   }
   // no rule

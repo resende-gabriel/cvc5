@@ -22,6 +22,7 @@
 
 #include "context/cdqueue.h"
 #include "proof/eager_proof_generator.h"
+#include "proof/drat/drat_proof.h"
 #include "prop/cnf_stream.h"
 #include "prop/sat_solver.h"
 #include "smt/env_obj.h"
@@ -90,6 +91,9 @@ class BVSolverBitblast : public BVSolver
    */
   void handleEagerAtom(TNode fact, bool assertFact);
 
+  /** Proof node manager. */
+  ProofNodeManager* d_pnm;
+
   /** Bit-blaster used to bit-blast atoms/terms. */
   std::unique_ptr<NodeBitblaster> d_bitblaster;
 
@@ -126,6 +130,14 @@ class BVSolverBitblast : public BVSolver
   std::unique_ptr<EagerProofGenerator> d_epg;
 
   BVProofRuleChecker d_bvProofChecker;
+  /** get the proof checker of this theory */
+  BVProofRuleChecker* getProofChecker();
+
+  std::ostringstream d_dratProof{};
+
+  std::ostream& getDratOstream() { return d_dratProof; }
+
+  std::vector<Node> getProofNodes(proof::DratProof dratProof);
 
   /** Stores the SatLiteral for a given fact. */
   context::CDHashMap<Node, prop::SatLiteral> d_factLiteralCache;
